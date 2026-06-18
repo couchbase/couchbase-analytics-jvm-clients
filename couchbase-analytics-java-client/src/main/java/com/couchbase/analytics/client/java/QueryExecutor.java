@@ -484,8 +484,8 @@ class QueryExecutor {
 
       if (response.code() == 404) {
         throw new QueryNotFoundException(
-          httpStatusMessage + "." +
-            " This could mean the connection string does not point to a compatible Couchbase Enterprise Analytics cluster," +
+          "Server said 404 Not Found." +
+            " This could mean the connection string does not point to a Couchbase Enterprise Analytics cluster," +
             " or it could mean the query result you are referencing has expired or been discarded.");
       }
 
@@ -494,7 +494,7 @@ class QueryExecutor {
         throw new AnalyticsException("HTTP response had no body; this is unexpected! " + httpStatusMessage);
       }
 
-      HeadInterceptInputStream bodyInterceptor; // cache the start of the response body so we can access it later
+      HeadInterceptInputStream bodyInterceptor = null; // cache the start of the response body so we can access it later
       try (HeadInterceptInputStream is = new HeadInterceptInputStream(body.byteStream(), 4 * 1024)) {
         bodyInterceptor = is;
         parser.feed(is);
@@ -511,7 +511,8 @@ class QueryExecutor {
         if (Thread.currentThread().isInterrupted()) {
           throw propagateInterruption(e);
         }
-        throw new AnalyticsException("Query response parsing failed due to " + e + " ; " + httpStatusMessage, e);
+        String head = bodyInterceptor == null ? "<unknown>" : bodyInterceptor.getHeadAsString();
+        throw new AnalyticsException("Query response parsing failed due to " + e + " ; " + httpStatusMessage + " ; response body = " + head, e);
       }
 
       if (request.method().equals("DELETE")) {
