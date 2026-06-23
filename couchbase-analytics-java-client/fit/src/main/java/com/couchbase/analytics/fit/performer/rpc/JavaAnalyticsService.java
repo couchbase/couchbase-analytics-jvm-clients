@@ -82,6 +82,8 @@ public class JavaAnalyticsService extends ColumnarServiceGrpc.ColumnarServiceImp
           .build()
         );
       }
+      builder.setSupportsServerAsyncQueries(true);
+
       responseObserver.onNext(builder.build());
       responseObserver.onCompleted();
     } catch (RuntimeException err) {

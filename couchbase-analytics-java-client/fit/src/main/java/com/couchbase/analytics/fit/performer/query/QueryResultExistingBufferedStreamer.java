@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024 Couchbase, Inc.
+ * Copyright (c) 2026 Couchbase, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,17 +17,15 @@
 package com.couchbase.analytics.fit.performer.query;
 
 import com.couchbase.analytics.client.java.QueryResult;
-import com.couchbase.analytics.client.java.Queryable;
 import com.couchbase.analytics.client.java.Row;
 import com.couchbase.analytics.fit.performer.util.ResultUtil;
+import fit.columnar.ContentAs;
 import fit.columnar.EmptyResultOrFailureResponse;
-import fit.columnar.ExecuteQueryRequest;
 import fit.columnar.QueryResultMetadataResponse;
 import fit.columnar.QueryRowResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -38,20 +36,18 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import static com.couchbase.analytics.fit.performer.query.PushBasedStreamer.toFit;
 
-class BufferedStreamer extends Thread {
+class ExistingBufferedStreamer extends Thread {
   private final Logger logger;
   private final BlockingQueue<QueryRowResponse> rows = new LinkedBlockingQueue<>(1);
   private final BlockingQueue<fit.columnar.EmptyResultOrFailureResponse> queryResult = new LinkedBlockingQueue<>(1);
   private final CompletableFuture<fit.columnar.QueryResultMetadataResponse> metadata = new CompletableFuture<>();
   private final AtomicBoolean rowsFinished = new AtomicBoolean(false);
-  private final Queryable clusterOrScope;
-  private final ExecuteQueryRequest executeQueryRequest;
+  private final QueryResult result;
   private final String queryHandle;
 
-  public BufferedStreamer(Queryable clusterOrScope, ExecuteQueryRequest request, String queryHandle) {
+  public ExistingBufferedStreamer(QueryResult result, String queryHandle) {
     this.logger = LoggerFactory.getLogger("Query " + queryHandle);
-    this.clusterOrScope = clusterOrScope;
-    this.executeQueryRequest = request;
+    this.result = result;
     this.queryHandle = queryHandle;
   }
 
@@ -67,41 +63,22 @@ class BufferedStreamer extends Thread {
 
   public void cancel() {
     logger.info("Cancelling query");
-    // This is how a user cancels operations in this SDK: using the JVM interrupt mechanism.
     interrupt();
   }
 
-
-
   @Override
   public void run() {
-      logger.info("Starting buffered query on handle {}: {}", queryHandle, executeQueryRequest.getStatement());
+      logger.info("Starting buffered query from existing result on handle {}", queryHandle);
 
       try {
-        QueryResult result;
-
-        try {
-          var options = QueryOptionsUtil.convertQueryOptions(executeQueryRequest);
-          result = options != null
-            ? clusterOrScope.executeQuery(executeQueryRequest.getStatement(), options)
-            : clusterOrScope.executeQuery(executeQueryRequest.getStatement());
-
-        } catch (RuntimeException err) {
-          logger.info("executeQuery failed at initial point: {}", err.toString());
-          // todo think about timings
-          queryResult.put(ResultUtil.failure(err, null));
-          // End thread
-          throw err;
-        }
-
-        logger.info("executeQuery() succeeded, proceeding with row iteration");
-
         // todo think about timings
         queryResult.put(ResultUtil.success(null));
 
         for (Row next : result.rows()) {
-          var processed = QueryRowUtil.processRow(executeQueryRequest, next);
-          // This will block until the driver pulls the previous row
+          // kludge: assume content as byte array
+          var contentAs = ContentAs.newBuilder().setAsByteArray(true).build();
+          var processed = QueryRowUtil.processRow(contentAs, next);
+          // This will block until the driver pulls it
           rows.put(processed.row());
         }
 
@@ -113,7 +90,7 @@ class BufferedStreamer extends Thread {
           .build());
       }
       catch (RuntimeException | InterruptedException err) {
-        logger.warn("executeQuery thread failed unexpectedly: " + err);
+        logger.warn("ExistingBufferedStreamer thread failed unexpectedly: " + err);
       }
   }
 
@@ -152,13 +129,13 @@ class BufferedStreamer extends Thread {
   }
 }
 
-// Handles a streaming query result.
-public class QueryResultBufferedStreamer implements ExecuteQueryStreamer {
-  private final String queryHandle = UUID.randomUUID().toString().substring(0, 6);
-  private final BufferedStreamer asyncExecuteQuery;
+public class QueryResultExistingBufferedStreamer implements ExecuteQueryStreamer {
+  private final String queryHandle;
+  private final ExistingBufferedStreamer asyncExecuteQuery;
 
-  public QueryResultBufferedStreamer(Queryable clusterOrScope, ExecuteQueryRequest request) {
-    asyncExecuteQuery = new BufferedStreamer(clusterOrScope, request, queryHandle);
+  public QueryResultExistingBufferedStreamer(QueryResult result, String queryHandle) {
+    this.queryHandle = queryHandle;
+    asyncExecuteQuery = new ExistingBufferedStreamer(result, queryHandle);
     asyncExecuteQuery.start();
   }
 

@@ -16,13 +16,24 @@
 
 package com.couchbase.analytics.fit.performer.rpc;
 
+import com.couchbase.analytics.client.java.QueryHandle;
+import com.couchbase.analytics.client.java.QueryResultHandle;
+import com.couchbase.analytics.client.java.QueryStatus;
 import com.couchbase.analytics.client.java.Queryable;
 import com.couchbase.analytics.fit.performer.modes.Mode;
 import com.couchbase.analytics.fit.performer.query.ExecuteQueryStreamer;
+import com.couchbase.analytics.fit.performer.query.QueryOptionsUtil;
 import com.couchbase.analytics.fit.performer.query.QueryResultBufferedStreamer;
+import com.couchbase.analytics.fit.performer.query.QueryResultExistingBufferedStreamer;
 import com.couchbase.analytics.fit.performer.query.QueryResultPushBasedStreamer;
 import com.couchbase.analytics.fit.performer.util.ErrorUtil;
 import com.couchbase.analytics.fit.performer.util.ResultUtil;
+import fit.columnar.AsyncCancelHandleRequest;
+import fit.columnar.AsyncDiscardResultsRequest;
+import fit.columnar.AsyncFetchResultsRequest;
+import fit.columnar.AsyncFetchStatusRequest;
+import fit.columnar.AsyncFetchStatusResponse;
+import fit.columnar.AsyncQueryStatusResultHandleRequest;
 import fit.columnar.CloseAllQueryResultsRequest;
 import fit.columnar.CloseQueryResultRequest;
 import fit.columnar.ColumnarCrossServiceGrpc;
@@ -35,19 +46,25 @@ import fit.columnar.QueryResultMetadataResponse;
 import fit.columnar.QueryResultRequest;
 import fit.columnar.QueryRowRequest;
 import fit.columnar.QueryRowResponse;
+import fit.columnar.StartQueryRequest;
+import fit.columnar.StartQueryResponse;
 import io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 import static com.couchbase.analytics.fit.performer.common.util.StartTimes.startTiming;
 
 public class JavaAnalyticsCrossService extends ColumnarCrossServiceGrpc.ColumnarCrossServiceImplBase {
   private final static Logger LOGGER = LoggerFactory.getLogger(JavaAnalyticsCrossService.class);
   private final IntraServiceContext context;
-  private final Map<String, ExecuteQueryStreamer> queryResultStreamers = new HashMap<>();
+  private final ConcurrentMap<String, ExecuteQueryStreamer> queryResultStreamers = new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, QueryHandle> queryHandles = new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, QueryStatus> queryStatuses = new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, QueryResultHandle> queryResultHandles = new ConcurrentHashMap<>();
 
   public JavaAnalyticsCrossService(IntraServiceContext context) {
     this.context = context;
@@ -85,6 +102,119 @@ public class JavaAnalyticsCrossService extends ColumnarCrossServiceGrpc.Columnar
 
     } catch (Throwable err) {
       LOGGER.warn("Failure during executeQuery: {}", err.toString());
+    }
+    responseObserver.onCompleted();
+  }
+
+  @Override
+  public void startQuery(StartQueryRequest request, StreamObserver<StartQueryResponse> responseObserver) {
+    try {
+      Queryable clusterOrScope;
+
+      if (request.hasClusterLevel()) {
+        clusterOrScope = context.cluster(request.getClusterLevel()).cluster();
+      } else if (request.hasScopeLevel()) {
+        clusterOrScope = context.scope(request.getScopeLevel());
+      } else {
+        throw new UnsupportedOperationException();
+      }
+
+      var options = QueryOptionsUtil.convertStartQueryOptions(request);
+      var handle = options != null
+        ? clusterOrScope.startQuery(request.getStatement(), options)
+        : clusterOrScope.startQuery(request.getStatement());
+
+      var queryHandle = UUID.randomUUID().toString();
+      queryHandles.put(queryHandle, handle);
+
+      responseObserver.onNext(StartQueryResponse.newBuilder()
+        .setQueryHandle(queryHandle)
+        .build());
+
+    } catch (Throwable err) {
+      responseObserver.onNext(StartQueryResponse.newBuilder()
+        .setFailure(ErrorUtil.convertError(err))
+        .build());
+    }
+    responseObserver.onCompleted();
+  }
+
+  @Override
+  public void asyncFetchStatus(AsyncFetchStatusRequest request, StreamObserver<AsyncFetchStatusResponse> responseObserver) {
+    try {
+      var handle = queryHandles.get(request.getQueryHandle());
+      var status = handle.fetchStatus();
+      queryStatuses.put(request.getQueryHandle(), status);
+
+      responseObserver.onNext(AsyncFetchStatusResponse.newBuilder()
+        .setQueryStatus(AsyncFetchStatusResponse.QueryStatusResult.newBuilder()
+          .setResultsReady(status.resultReady())
+          .setToString(status.toString())
+          .build())
+        .build());
+
+    } catch (Throwable err) {
+      responseObserver.onNext(AsyncFetchStatusResponse.newBuilder()
+        .setFailure(ErrorUtil.convertError(err))
+        .build());
+    }
+    responseObserver.onCompleted();
+  }
+
+  @Override
+  public void asyncCancelHandle(AsyncCancelHandleRequest request, StreamObserver<EmptyResultOrFailureResponse> responseObserver) {
+    var startTime = startTiming();
+    try {
+      var handle = queryHandles.get(request.getQueryHandle());
+      handle.cancel();
+      responseObserver.onNext(ResultUtil.success(startTime));
+    } catch (Throwable err) {
+      responseObserver.onNext(ResultUtil.failure(err, startTime));
+    }
+    responseObserver.onCompleted();
+  }
+
+  @Override
+  public void asyncQueryStatusResultHandle(AsyncQueryStatusResultHandleRequest request, StreamObserver<EmptyResultOrFailureResponse> responseObserver) {
+    var startTime = startTiming();
+    try {
+      var status = queryStatuses.get(request.getQueryHandle());
+      var resultHandle = status.resultHandle();
+      queryResultHandles.put(request.getQueryHandle(), resultHandle);
+      responseObserver.onNext(ResultUtil.success(startTime));
+    } catch (Throwable err) {
+      responseObserver.onNext(ResultUtil.failure(err, startTime));
+    }
+    responseObserver.onCompleted();
+  }
+
+  @Override
+  public void asyncFetchResults(AsyncFetchResultsRequest request, StreamObserver<EmptyResultOrFailureResponse> responseObserver) {
+    var startTime = startTiming();
+    try {
+      var resultHandle = queryResultHandles.get(request.getQueryHandle());
+      var options = QueryOptionsUtil.convertRowOptions(request);
+      var queryResult = options != null ? resultHandle.bufferRows(options) : resultHandle.bufferRows();
+
+      var streamer = new QueryResultExistingBufferedStreamer(queryResult, request.getQueryHandle());
+      queryResultStreamers.put(request.getQueryHandle(), streamer);
+
+      responseObserver.onNext(ResultUtil.success(startTime));
+    } catch (Throwable err) {
+      responseObserver.onNext(ResultUtil.failure(err, startTime));
+    }
+    responseObserver.onCompleted();
+  }
+
+  @Override
+  public void asyncDiscardResults(AsyncDiscardResultsRequest request, StreamObserver<EmptyResultOrFailureResponse> responseObserver) {
+    var startTime = startTiming();
+    try {
+      var resultHandle = queryResultHandles.get(request.getQueryHandle());
+      resultHandle.discard();
+      responseObserver.onNext(ResultUtil.success(startTime));
+    } catch (Throwable err) {
+      responseObserver.onNext(ResultUtil.failure(err, startTime));
     }
     responseObserver.onCompleted();
   }
@@ -147,11 +277,19 @@ public class JavaAnalyticsCrossService extends ColumnarCrossServiceGrpc.Columnar
 
   @Override
   public void closeQueryResult(CloseQueryResultRequest request, StreamObserver<EmptyResultOrFailureResponse> responseObserver) {
+    queryResultStreamers.remove(request.getQueryHandle());
+    queryHandles.remove(request.getQueryHandle());
+    queryStatuses.remove(request.getQueryHandle());
+    queryResultHandles.remove(request.getQueryHandle());
     noop(responseObserver);
   }
 
   @Override
   public void closeAllQueryResults(CloseAllQueryResultsRequest request, StreamObserver<EmptyResultOrFailureResponse> responseObserver) {
+    queryResultStreamers.clear();
+    queryHandles.clear();
+    queryStatuses.clear();
+    queryResultHandles.clear();
     noop(responseObserver);
   }
 
