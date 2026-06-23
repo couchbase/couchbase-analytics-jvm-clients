@@ -19,6 +19,7 @@ import com.couchbase.analytics.client.java.AnalyticsException;
 import com.couchbase.analytics.client.java.AnalyticsTimeoutException;
 import com.couchbase.analytics.client.java.InvalidCredentialException;
 import com.couchbase.analytics.client.java.QueryException;
+import com.couchbase.analytics.client.java.QueryNotFoundException;
 import com.couchbase.analytics.client.java.internal.utils.lang.CbThrowables;
 import fit.columnar.PlatformErrorType;
 
@@ -36,6 +37,15 @@ public class ErrorUtil {
 
   public static fit.columnar.Error convertError(Throwable raw) {
     var ret = fit.columnar.Error.newBuilder();
+
+    // FIT framework assumes clients surface all server-side timeouts as AnalyticsTimeoutException,
+    // but this is incompatible with the documented semantics of AnalyticsTimeoutException, which is
+    // "Thrown if an interaction with the Analytics cluster does not complete before its timeout expires."
+    // In this case, the interaction completed, so AnalyticsTimeoutException is not appropriate.
+    // Convert it to a timeout exception just for the FIT driver.
+    if (raw instanceof QueryException queryException && queryException.code() == 21002) {
+      raw = new AnalyticsTimeoutException(raw.getMessage());
+    }
 
     if (raw instanceof AnalyticsException) {
       var out = fit.columnar.ColumnarError.newBuilder()
@@ -57,6 +67,11 @@ public class ErrorUtil {
 
       if (raw instanceof AnalyticsTimeoutException) {
         out.setSubException(fit.columnar.SubColumnarError.newBuilder().setTimeoutException(fit.columnar.TimeoutException.newBuilder().build())
+          .build());
+      }
+
+      if (raw instanceof QueryNotFoundException) {
+        out.setSubException(fit.columnar.SubColumnarError.newBuilder().setQueryNotFoundException(fit.columnar.QueryNotFoundException.newBuilder().build())
           .build());
       }
 

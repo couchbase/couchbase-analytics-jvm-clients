@@ -17,7 +17,9 @@
 package com.couchbase.analytics.fit.performer.query;
 
 import com.couchbase.analytics.client.java.QueryOptions;
+import com.couchbase.analytics.client.java.RowOptions;
 import com.couchbase.analytics.client.java.ScanConsistency;
+import com.couchbase.analytics.client.java.StartQueryOptions;
 import com.couchbase.analytics.fit.performer.util.CustomDeserializer;
 import com.couchbase.analytics.fit.performer.util.Durations;
 import com.couchbase.analytics.fit.performer.util.grpc.ProtobufConversions;
@@ -26,6 +28,7 @@ import org.jspecify.annotations.Nullable;
 import java.util.function.Consumer;
 
 import static com.couchbase.analytics.fit.performer.util.grpc.ProtobufConversions.protobufStructToMap;
+import static java.time.Duration.ofSeconds;
 
 public class QueryOptionsUtil {
   public static @Nullable Consumer<QueryOptions> convertQueryOptions(fit.columnar.ExecuteQueryRequest executeQueryRequest) {
@@ -66,6 +69,59 @@ public class QueryOptionsUtil {
       }
       if (opts.hasMaxRetries()) {
         options.maxRetries(opts.getMaxRetries());
+      }
+    };
+  }
+
+  public static @Nullable Consumer<StartQueryOptions> convertStartQueryOptions(fit.columnar.StartQueryRequest startQueryRequest) {
+    if (!startQueryRequest.hasOptions()) {
+      return null;
+    }
+
+    return options -> {
+      var opts = startQueryRequest.getOptions();
+      if (opts.hasParametersPositional()) {
+        options.parameters(ProtobufConversions.protobufListValueToList(opts.getParametersPositional()));
+      }
+      if (opts.hasParametersNamed()) {
+        options.parameters(protobufStructToMap(opts.getParametersNamed()));
+      }
+      if (opts.hasReadonly()) {
+        options.readOnly(opts.getReadonly());
+      }
+      if (opts.hasScanConsistency()) {
+        options.scanConsistency(switch (opts.getScanConsistency()) {
+          case SCAN_CONSISTENCY_REQUEST_PLUS -> ScanConsistency.REQUEST_PLUS;
+          case SCAN_CONSISTENCY_NOT_BOUNDED -> ScanConsistency.NOT_BOUNDED;
+          case UNRECOGNIZED -> throw new IllegalArgumentException("Bad scan consistency");
+        });
+      }
+      if (opts.hasRaw()) {
+        options.raw(protobufStructToMap(opts.getRaw()));
+      }
+      if (opts.hasTimeout()) {
+        options.timeout(Durations.toJava(opts.getTimeout()));
+      }
+      if (opts.hasMaxRetries()) {
+        options.maxRetries(opts.getMaxRetries());
+      }
+    };
+  }
+
+  public static @Nullable Consumer<RowOptions> convertRowOptions(fit.columnar.AsyncFetchResultsRequest asyncFetchResultsRequest) {
+//    if (!asyncFetchResultsRequest.hasOptions()) {
+//      return null;
+//    }
+
+    return options -> {
+      options.timeout(ofSeconds(30));
+
+      if (asyncFetchResultsRequest.hasOptions()) {
+        var opts = asyncFetchResultsRequest.getOptions();
+        if (opts.hasDeserializer() && opts.getDeserializer().hasCustom()) {
+          CustomDeserializer customDeserializer = new CustomDeserializer();
+          options.deserializer(customDeserializer);
+        }
       }
     };
   }

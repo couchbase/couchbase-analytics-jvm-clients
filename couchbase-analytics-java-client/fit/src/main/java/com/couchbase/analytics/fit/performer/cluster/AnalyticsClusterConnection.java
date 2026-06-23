@@ -68,6 +68,9 @@ public class AnalyticsClusterConnection {
             if (timeoutOptions.hasQueryTimeout()) {
               timeout.queryTimeout(Durations.toJava(timeoutOptions.getQueryTimeout()));
             }
+            if (timeoutOptions.hasHandleTimeout()) {
+              timeout.handleRequestTimeout(Durations.toJava(timeoutOptions.getHandleTimeout()));
+            }
           }
         })
         .security(sec -> {
