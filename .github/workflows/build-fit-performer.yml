@@ -1,0 +1,42 @@
+name: Build FIT performer
+
+run-name: ${{ inputs.ref }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches:
+      - 'main'
+      - '[0-9]+.[0-9]+.x' # release branches
+    tags:
+      - '*'
+    paths-ignore:
+      - '.gitignore'
+      - '.editorconfig'
+      - '*-examples/**'
+      - '*.md'
+
+  workflow_dispatch:
+    inputs:
+      ref:
+        type: string
+        description: "Performer version. Specify a branch, tag, full commit hash, or GitHub PR like 'refs/pull/37/merge'"
+        required: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: couchbaselabs/sdk-docker-build-action@v1
+        with:
+          sdk: analytics-java
+          ref: ${{ inputs.ref }}
+        env:
+          DOCKER_BUILD_SUMMARY: false
