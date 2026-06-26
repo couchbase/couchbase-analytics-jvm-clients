@@ -1,5 +1,7 @@
 # couchbase-analytics-jvm-clients
 
+[![Maven Central](https://maven-badges.sml.io/sonatype-central/com.couchbase.client/couchbase-analytics-java-client/badge.svg?subject=Maven%20Central&color=blue)](https://central.sonatype.com/artifact/com.couchbase.client/couchbase-analytics-java-client)
+
 JVM clients for Couchbase Enterprise Analytics
 
 
