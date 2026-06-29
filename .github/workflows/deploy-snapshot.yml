@@ -50,7 +50,7 @@ jobs:
 
       - name: Run fit-cli
         run: |
-          curl -fsSL https://raw.githubusercontent.com/couchbaselabs/fit-cli/main/install.sh | CHANNEL="${{ vars.FIT_CLI_CHANNEL || inputs.fit_cli_channel }}" bash
+          curl -fsSL https://raw.githubusercontent.com/couchbaselabs/fit-cli/main/install.sh | CHANNEL="${{ inputs.fit_cli_channel }}" bash
           fit run preset "${{ inputs.preset }}" --performer "${{ inputs.performer_image_name }}"
 
       # GHA artifacts are stored as people expect them, but note that fit-cli artifacts are automatically uploaded to S3:

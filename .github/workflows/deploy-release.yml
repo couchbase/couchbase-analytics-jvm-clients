@@ -26,7 +26,7 @@ on:
 
 jobs:
   run-fit-java:
-    uses: ./.github/workflows/deploy-release.yml
+    uses: ./.github/workflows/deploy-snapshot.yml
     with:
       preset: ${{ vars.FIT_CLI_PRESET || inputs.fit_cli_preset }}
       performer_image_name: 'analytics-java-fit-performer:main'
