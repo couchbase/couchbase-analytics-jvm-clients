@@ -1,33 +1,65 @@
-name: Run FIT Testing (Java)
+name: Run FIT Testing (Internal/Shared)
 
 on:
-  schedule:
-    # Each day at midnight (UTC)
-    - cron: '0 0 * * *'
   workflow_dispatch:
     inputs:
-      fit_cli_preset:
-        description: FIT preset to run.
-        required: false
+      preset:
+        description: FIT preset type to generate and execute.  (`fit definition list-presets`)
+        default: qe-set
         type: string
-        default: enterprise-analytics-qe-set
+      performer_image_name:
+        description: Performer image name to use e.g. "java-fit-performer:main".
+        required: true
+        type: string
       fit_cli_channel:
-        description: fit-cli install channel ("latest" or "ci").
-        required: false
+        description: fit-cli install channel. ("latest" or "ci")
         type: string
         default: ci
   workflow_call:
     inputs:
+      preset:
+        description: FIT preset type to generate and execute.  (`fit definition list-presets`)
+        required: true
+        type: string
+      performer_image_name:
+        description: Performer image name to use e.g. "java-fit-performer:main".
+        required: true
+        type: string
       fit_cli_channel:
-        description: fit-cli install channel ("latest" or "ci").
+        description: fit-cli install channel. ("latest" or "ci")
         required: false
         type: string
         default: ci
 
+permissions:
+  id-token: write   # required for GitHub OIDC
+
 jobs:
-  run-fit-java:
-    uses: ./.github/workflows/deploy-release.yml
-    with:
-      preset: ${{ vars.FIT_CLI_PRESET || inputs.fit_cli_preset }}
-      performer_image_name: 'analytics-java-fit-performer:main'
-      fit_cli_channel: ${{ vars.FIT_CLI_CHANNEL || inputs.fit_cli_channel }}
+  run-fit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: us-west-2
+          role-to-assume: arn:aws:iam::958525475024:role/fit-cli-role
+          role-session-name: gha-${{ github.actor }}-${{ github.run_id }}
+          audience: sts.amazonaws.com
+          retry-max-attempts: 3
+          role-duration-seconds: 43200
+
+      - name: Run fit-cli
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/couchbaselabs/fit-cli/main/install.sh | CHANNEL="${{ vars.FIT_CLI_CHANNEL || inputs.fit_cli_channel }}" bash
+          fit run preset "${{ inputs.preset }}" --performer "${{ inputs.performer_image_name }}"
+
+      # GHA artifacts are stored as people expect them, but note that fit-cli artifacts are automatically uploaded to S3:
+      # https://us-west-2.console.aws.amazon.com/s3/buckets/fit-cli
+      - name: Upload fit-cli artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fit-cli-run-${{ github.run_id }}
+          path: /tmp/fit-cli/
+          retention-days: 90
+          if-no-files-found: warn
