@@ -5,7 +5,7 @@ on:
     inputs:
       preset:
         description: FIT preset type to generate and execute.  (`fit definition list-presets`)
-        default: qe-set
+        default: enterprise-analytics-qe-set
         type: string
       collect_extra_diagnostics:
         description: Collect additional diagnostics (includes cbcollect, is slower)

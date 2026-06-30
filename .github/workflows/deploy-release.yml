@@ -10,7 +10,7 @@ on:
         description: FIT preset to run.
         required: false
         type: string
-        default: qe-set
+        default: enterprise-analytics-qe-set
       fit_cli_collect_extra_diagnostics:
         description: Collect additional diagnostics (includes cbcollect, is slower)
         required: false
