@@ -7,12 +7,17 @@ on:
         description: FIT preset type to generate and execute.  (`fit definition list-presets`)
         default: qe-set
         type: string
+      collect_extra_diagnostics:
+        description: Collect additional diagnostics (includes cbcollect, is slower)
+        default: true
+        type: boolean
       performer_image_name:
         description: Performer image name to use e.g. "java-fit-performer:main".
         required: true
         type: string
       fit_cli_channel:
         description: fit-cli install channel. ("latest" or "ci")
+        required: false
         type: string
         default: ci
   workflow_call:
@@ -21,6 +26,11 @@ on:
         description: FIT preset type to generate and execute.  (`fit definition list-presets`)
         required: true
         type: string
+      collect_extra_diagnostics:
+        description: Collect additional diagnostics (includes cbcollect, is slower)
+        required: false
+        type: boolean
+        default: true
       performer_image_name:
         description: Performer image name to use e.g. "java-fit-performer:main".
         required: true
@@ -51,11 +61,16 @@ jobs:
       - name: Run fit-cli
         run: |
           curl -fsSL https://raw.githubusercontent.com/couchbaselabs/fit-cli/main/install.sh | CHANNEL="${{ inputs.fit_cli_channel }}" bash
-          fit run preset "${{ inputs.preset }}" --performer "${{ inputs.performer_image_name }}"
+          args=(preset "${{ inputs.preset }}" --performer "${{ inputs.performer_image_name }}")
+          if [[ "${{ inputs.collect_extra_diagnostics }}" == "true" ]]; then
+            args+=(--cbcollect)
+          fi
+          fit run "${args[@]}"
 
       # GHA artifacts are stored as people expect them, but note that fit-cli artifacts are automatically uploaded to S3:
       # https://us-west-2.console.aws.amazon.com/s3/buckets/fit-cli
-      - name: Upload fit-cli artifacts
+      # todo might drop these - stick to my guns!
+      - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:

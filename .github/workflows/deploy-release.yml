@@ -10,7 +10,12 @@ on:
         description: FIT preset to run.
         required: false
         type: string
-        default: enterprise-analytics-qe-set
+        default: qe-set
+      fit_cli_collect_extra_diagnostics:
+        description: Collect additional diagnostics (includes cbcollect, is slower)
+        required: false
+        type: boolean
+        default: true
       fit_cli_channel:
         description: fit-cli install channel ("latest" or "ci").
         required: false
@@ -18,6 +23,11 @@ on:
         default: ci
   workflow_call:
     inputs:
+      fit_cli_collect_extra_diagnostics:
+        description: Collect additional diagnostics (includes cbcollect, is slower)
+        required: false
+        type: boolean
+        default: true
       fit_cli_channel:
         description: fit-cli install channel ("latest" or "ci").
         required: false
@@ -29,5 +39,6 @@ jobs:
     uses: ./.github/workflows/deploy-snapshot.yml
     with:
       preset: ${{ vars.FIT_CLI_PRESET || inputs.fit_cli_preset }}
+      collect_extra_diagnostics: ${{ inputs.fit_cli_collect_extra_diagnostics }}
       performer_image_name: 'analytics-java-fit-performer:main'
       fit_cli_channel: ${{ vars.FIT_CLI_CHANNEL || inputs.fit_cli_channel }}
